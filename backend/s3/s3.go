@@ -844,6 +844,21 @@ In Ceph, this can be increased with the "rgw list buckets max chunk" option.
 			Default: (encoder.EncodeInvalidUtf8 |
 				encoder.EncodeSlash |
 				encoder.EncodeDot),
+		}, {
+			Name: "headers",
+			Help: `Set HTTP headers for all transactions
+
+Use this to set additional HTTP headers for all transactions
+
+The input format is comma separated list of key,value pairs.  Standard
+[CSV encoding](https://godoc.org/encoding/csv) may be used.
+
+For example to set a Cookie use 'Cookie,name=value', or '"Cookie","name=value"'.
+
+You can set multiple headers, eg '"Cookie","name=value","Authorization","xxx"'.
+`,
+			Default:  fs.CommaSepList{},
+			Advanced: true,
 		}},
 	})
 }
@@ -887,6 +902,7 @@ type Options struct {
 	LeavePartsOnError     bool                 `config:"leave_parts_on_error"`
 	ListChunk             int64                `config:"list_chunk"`
 	Enc                   encoder.MultiEncoder `config:"encoding"`
+	Headers               fs.CommaSepList      `config:"headers"`
 }
 
 // Fs represents a remote s3 server
@@ -946,6 +962,20 @@ func (f *Fs) String() string {
 // Features returns the optional features of this Fs
 func (f *Fs) Features() *fs.Features {
 	return f.features
+}
+
+// Adds the configured headers to the request if any
+func addHeaders(req *http.Request, opt *Options) {
+	for i := 0; i < len(opt.Headers); i += 2 {
+		key := opt.Headers[i]
+		value := opt.Headers[i+1]
+		req.Header.Add(key, value)
+	}
+}
+
+// Adds the configured headers to the request if any
+func (f *Fs) addHeaders(req *http.Request) {
+	addHeaders(req, &f.opt)
 }
 
 // retryErrorCodes is a slice of error codes that we will retry
@@ -2354,6 +2384,7 @@ func (o *Object) Update(ctx context.Context, in io.Reader, src fs.ObjectInfo, op
 		httpReq.Header = headers
 		httpReq.ContentLength = size
 
+		o.fs.addHeaders(httpReq)
 		err = o.fs.pacer.CallNoRetry(func() (bool, error) {
 			resp, err := o.fs.srv.Do(httpReq)
 			if err != nil {
